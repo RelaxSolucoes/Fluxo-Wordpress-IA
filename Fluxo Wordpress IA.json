@@ -1,0 +1,256 @@
+{
+  "name": "Fluxo Wordpress IA",
+  "nodes": [
+    {
+      "parameters": {
+        "public": true,
+        "mode": "webhook",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1408,
+        32
+      ],
+      "id": "568ade17-6860-4bc5-bac6-395f8ddc988d",
+      "name": "When chat message received",
+      "webhookId": "36b8786b-1771-4f10-931f-485203cdbca9"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normaliza entradas (web_form, chat_widget, whatsapp_direct) em um envelope único\nconst input = $input.all()[0].json;\n\nconst channel = input.channel || (input.metadata && input.metadata.sourceType === 'chat_widget' ? 'chat_widget' : (input.apiKey && input.serverUrl ? 'whatsapp_direct' : 'unknown'));\n\nlet needsManualSend = false;\nif (channel === 'web_form') needsManualSend = true; // formulário: enviar via Evolution\n\nconst contextualInput = input.chatInput || (input.message && input.message.text) || '';\n\nreturn [{\n  json: {\n    ...input,\n    channel,\n    needsManualSend,\n    contextualInput,\n    originalInput: input.chatInput\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1232,
+        32
+      ],
+      "id": "d515f81c-1e77-48d0-a8a6-76e204152460",
+      "name": "Detect Source & Prepare Data"
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "=Você é um assistente virtual da loja do usuário.\n\nDiretrizes (edite livremente para o seu negócio):\n- Saudação breve e profissional.\n- Responder dúvidas com clareza.\n- Se identificar intenção de compra/contratação, fazer 2-3 perguntas para entender a necessidade (nome, objetivo, prazo).\n- Manter tom amigável, sem promessas ou dados sensíveis.\n- Não cite marcas, URLs ou credenciais específicas.\n\nContexto: responda usando a mensagem original do usuário e qualquer metadado enviado.\n\nAgora responda à pergunta do usuário:\n\"\"\"\n{{ $json.contextualInput }}\n\"\"\"\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.1,
+      "position": [
+        -1024,
+        32
+      ],
+      "id": "5c9cb21d-f838-4db0-8393-277fdca0e1d5",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "condition-1",
+              "leftValue": "={{ $('Detect Source & Prepare Data').item.json.needsManualSend }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -688,
+        32
+      ],
+      "id": "373c3fc3-1d7e-40d5-a8cb-76dc26588e6e",
+      "name": "Check if Manual Send"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Detect Source & Prepare Data').item.json.provider && $('Detect Source & Prepare Data').item.json.provider.serverUrl ? $('Detect Source & Prepare Data').item.json.provider.serverUrl + '/message/sendText/' + $('Detect Source & Prepare Data').item.json.provider.instanceName : '' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Detect Source & Prepare Data').item.json.provider.apiKey }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "number",
+              "value": "={{ $('Detect Source & Prepare Data').item.json.remoteJid }}"
+            },
+            {
+              "name": "text",
+              "value": "={{ $json.output }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -464,
+        -128
+      ],
+      "id": "41505257-c8b4-47cd-a298-9c1ff10902b9",
+      "name": "Send WhatsApp Message"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Para mensagens que NÃO precisam de envio manual (WhatsApp direto)\n// Retorna a resposta da IA para que a Evolution API processe automaticamente\n\nconst aiResponse = $node['AI Agent'].json.output;\n\nreturn [{\n  json: {\n    output: aiResponse,\n    answer: aiResponse,\n    sourceType: 'whatsapp_direct',\n    processedBy: 'evolution_api'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -496,
+        160
+      ],
+      "id": "38144cdd-6c67-4ac3-ba76-8b1657f0a62e",
+      "name": "Format Response for Evolution"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -1264,
+        240
+      ],
+      "id": "2ee67974-1b97-4fd2-9dd5-66de1fe2b32d",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "xuiuR0CaCY3bhHnQ",
+          "name": "OpenAi account - Rony"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "contextWindowLength": 10
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        -1024,
+        240
+      ],
+      "id": "53a58021-bcfd-414c-baf8-f739c2c5f593",
+      "name": "Simple Memory"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "Detect Source & Prepare Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detect Source & Prepare Data": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Check if Manual Send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check if Manual Send": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Response for Evolution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "9d5a2b1a-f153-4d72-83f7-ec1bd6e20ae2",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "679b146c94230a881903b4edc286c759150e5139dfc7691c05b30309631d0fd0"
+  },
+  "id": "gJfyrhUQFAvTSWBO",
+  "tags": []
+}
